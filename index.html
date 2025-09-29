@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Dropship Demo — Login, Profile & Scan-to-Pay</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:20px;max-width:900px}
+    input,button,textarea{padding:8px;margin:6px 0;width:100%;box-sizing:border-box}
+    .row{display:flex;gap:10px}
+    .col{flex:1}
+    .card{padding:16px;border:1px solid #ddd;border-radius:8px;margin-bottom:16px}
+    #qr img{max-width:200px}
+  </style>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+  <h1>Dropship Demo (GitHub Pages friendly)</h1>
+
+  <div id="auth-card" class="card">
+    <h3>Register / Login</h3>
+
+    <div id="register">
+      <input id="reg-email" placeholder="Email" />
+      <input id="reg-pass" placeholder="Password (min 6)" type="password" />
+      <button id="btn-register">Register</button>
+    </div>
+
+    <hr/>
+
+    <div id="login">
+      <input id="login-email" placeholder="Email" />
+      <input id="login-pass" placeholder="Password" type="password" />
+      <button id="btn-login">Login</button>
+    </div>
+
+    <p id="auth-msg"></p>
+    <button id="btn-logout" style="display:none">Logout</button>
+  </div>
+
+  <div id="profile-card" class="card" style="display:none">
+    <h3>Your Profile (saved to Firestore)</h3>
+    <label>Mobile number</label>
+    <input id="phone" placeholder="+91xxxxxxxxxx" />
+    <label>Address</label>
+    <textarea id="address" rows="3" placeholder="Street, City, State, PIN"></textarea>
+    <label>Full name</label>
+    <input id="fullname" placeholder="Full name" />
+    <div class="row">
+      <div class="col"><button id="btn-save">Save Profile</button></div>
+      <div class="col"><button id="btn-load">Load Profile</button></div>
+    </div>
+
+    <div id="profile-msg"></div>
+  </div>
+
+  <div id="payment-card" class="card" style="display:none">
+    <h3>Payment (Scan to Pay)</h3>
+    <p>Open your scanner app and scan the QR below to pay.</p>
+
+    <!-- Put your Stripe Payment Link URL here (replace below) -->
+    <input id="payment-link" placeholder="Paste your Stripe Payment Link URL here" />
+    <button id="btn-gen-qr">Generate QR</button>
+
+    <div id="qr" style="margin-top:12px;"></div>
+
+    <p style="font-size:0.9em;color:#555">
+      Tip: Create a Payment Link in Stripe Dashboard and paste its URL above.
+    </p>
+  </div>
+
+<script>
+  // ====== CONFIG: replace these with your Firebase project config ======
+  const firebaseConfig = {
+    apiKey: "REPLACE_WITH_YOUR_API_KEY",
+    authDomain: "REPLACE_WITH_YOUR_AUTH_DOMAIN",
+    projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
+    // optional:
+    storageBucket: "project.appspot.com",
+    messagingSenderId: "SENDER_ID",
+    appId: "APP_ID"
+  };
+  // ===================================================================
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // UI refs
+  const regEmail = document.getElementById('reg-email');
+  const regPass = document.getElementById('reg-pass');
+  const btnRegister = document.getElementById('btn-register');
+
+  const loginEmail = document.getElementById('login-email');
+  const loginPass = document.getElementById('login-pass');
+  const btnLogin = document.getElementById('btn-login');
+
+  const authMsg = document.getElementById('auth-msg');
+  const btnLogout = document.getElementById('btn-logout');
+
+  const profileCard = document.getElementById('profile-card');
+  const phoneInput = document.getElementById('phone');
+  const addressInput = document.getElementById('address');
+  const fullnameInput = document.getElementById('fullname');
+  const btnSave = document.getElementById('btn-save');
+  const btnLoad = document.getElementById('btn-load');
+  const profileMsg = document.getElementById('profile-msg');
+
+  const paymentCard = document.getElementById('payment-card');
+  const paymentLinkInput = document.getElementById('payment-link');
+  const btnGenQR = document.getElementById('btn-gen-qr');
+  const qr = document.getElementById('qr');
+
+  // Register
+  btnRegister.addEventListener('click', async () => {
+    const email = regEmail.value.trim();
+    const pass = regPass.value;
+    try {
+      const userCred = await auth.createUserWithEmailAndPassword(email, pass);
+      authMsg.textContent = "Registered & signed in as " + userCred.user.email;
+    } catch (e) {
+      authMsg.textContent = "Error: " + e.message;
+    }
+  });
+
+  // Login
+  btnLogin.addEventListener('click', async () => {
+    const email = loginEmail.value.trim();
+    const pass = loginPass.value;
+    try {
+      const userCred = await auth.signInWithEmailAndPassword(email, pass);
+      authMsg.textContent = "Signed in as " + userCred.user.email;
+    } catch (e) {
+      authMsg.textContent = "Error: " + e.message;
+    }
+  });
+
+  // Logout
+  btnLogout.addEventListener('click', () => auth.signOut());
+
+  // Auth state
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      btnLogout.style.display = 'inline-block';
+      profileCard.style.display = 'block';
+      paymentCard.style.display = 'block';
+      document.getElementById('auth-card').style.display = 'block';
+      authMsg.textContent = 'Signed in: ' + (user.email || user.phoneNumber || user.uid);
+    } else {
+      btnLogout.style.display = 'none';
+      profileCard.style.display = 'none';
+      paymentCard.style.display = 'none';
+      authMsg.textContent = 'Not signed in';
+    }
+  });
+
+  // Save profile to Firestore under collection "users" with doc = uid
+  btnSave.addEventListener('click', async () => {
+    const u = auth.currentUser;
+    if (!u) { profileMsg.textContent = 'Login first'; return; }
+    const docRef = db.collection('users').doc(u.uid);
+    const payload = {
+      fullname: fullnameInput.value || '',
+      phone: phoneInput.value || '',
+      address: addressInput.value || '',
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    try {
+      await docRef.set(payload, { merge: true });
+      profileMsg.textContent = 'Profile saved.';
+    } catch (e) {
+      profileMsg.textContent = 'Save error: ' + e.message;
+    }
+  });
+
+  // Load profile
+  btnLoad.addEventListener('click', async () => {
+    const u = auth.currentUser;
+    if (!u) { profileMsg.textContent = 'Login first'; return; }
+    try {
+      const snap = await db.collection('users').doc(u.uid).get();
+      if (!snap.exists) { profileMsg.textContent = 'No saved profile yet.'; return; }
+      const d = snap.data();
+      fullnameInput.value = d.fullname || '';
+      phoneInput.value = d.phone || '';
+      addressInput.value = d.address || '';
+      profileMsg.textContent = 'Profile loaded.';
+    } catch (e) {
+      profileMsg.textContent = 'Load error: ' + e.message;
+    }
+  });
+
+  // Generate QR image for the payment link (uses Google Chart API)
+  btnGenQR.addEventListener('click', () => {
+    const url = paymentLinkInput.value.trim();
+    if (!url) { qr.innerHTML = '<em>Paste your Stripe Payment Link first</em>'; return; }
+    // Encode the URL then use Google Charts API to create a QR
+    const encoded = encodeURIComponent(url);
+    const imgSrc = `https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl=${encoded}&choe=UTF-8`;
+    qr.innerHTML = `<img src="${imgSrc}" alt="Pay QR"><p><a href="${url}" target="_blank">Open payment link</a></p>`;
+  });
+
+</script>
+</body>
+</html>
